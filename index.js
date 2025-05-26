@@ -6,73 +6,112 @@ const cors = require('cors');
 const app = express();
 app.use(cors());
 
+const PORT = process.env.PORT || 3000;
+
+// Replace with your real Google API key
+const GOOGLE_API_KEY = 'AIzaSyCnoZDb48zkO9FAyMmWQ-qX06IYYTGRTeM';
+
+// Basic SEO & GEO score calculation based on H1 tags (example logic)
+function calculateSeoScore(h1Count) {
+  // Simple example: more H1s = lower SEO score (ideally 1 H1)
+  if (h1Count === 1) return 90;
+  if (h1Count === 0) return 30;
+  return Math.max(0, 100 - (h1Count - 1) * 20);
+}
+
+function calculateGeoScore(h1Count) {
+  // Dummy GEO scoring: reward presence of H1 and assume good structure
+  return h1Count > 0 ? 80 : 40;
+}
+
+function generateSeoSuggestions(h1Count) {
+  if (h1Count === 0) return ['Add at least one <h1> tag for better SEO.'];
+  if (h1Count > 1) return ['Reduce multiple <h1> tags to only one per page.'];
+  return ['Good number of <h1> tags found.'];
+}
+
+function generateGeoSuggestions(h1Count) {
+  if (h1Count === 0) return ['Include headings to improve content structure for AI models.'];
+  return ['Content structure looks good for AI analysis.'];
+}
+
+// Route to analyze SEO & GEO scores based on URL content
 app.get('/analyze', async (req, res) => {
-  const url = req.query.url;
-
-  if (!url) {
-    return res.status(400).json({ error: 'URL is required' });
-  }
-
   try {
-    const { data } = await axios.get(url);
-    const $ = cheerio.load(data);
+    const targetUrl = req.query.url;
+    if (!targetUrl) {
+      return res.status(400).json({ error: 'Missing url query parameter' });
+    }
 
-    // Extract info
-    const title = $('title').text() || '';
-    const metaDesc = $('meta[name="description"]').attr('content') || '';
-    const h1Tags = $('h1');
-    const h1Count = h1Tags.length;
-    const hasFaqSchema = $('script[type="application/ld+json"]').text().includes('FAQPage');
+    // Fetch HTML content
+    const response = await axios.get(targetUrl);
+    const html = response.data;
 
-    const bodyText = $('body').text().replace(/\s+/g, ' ').trim();
-    const wordCount = bodyText.split(' ').length;
+    // Load HTML to cheerio for parsing
+    const $ = cheerio.load(html);
 
-    // SEO Score (out of 100)
-    let seoScore = 50;
-    if (title) seoScore += 10;
-    if (metaDesc.length >= 80) seoScore += 10;
-    if (h1Count > 0) seoScore += 10;
-    if (wordCount > 300) seoScore += 10;
-    if (hasFaqSchema) seoScore += 10;
+    // Count number of <h1> tags
+    const h1Count = $('h1').length;
 
-    // GEO Score (out of 100)
-    let geoScore = 50;
-    if (metaDesc.match(/AI|machine learning|FAQ|guide|how to/i)) geoScore += 10;
-    if (hasFaqSchema) geoScore += 10;
-    if (title.match(/\b(what|how|why|guide|tips)\b/i)) geoScore += 10;
-    if (bodyText.match(/\b(who is|how does|what is)\b/i)) geoScore += 10;
-    if (wordCount > 500) geoScore += 10;
+    // Calculate SEO and GEO scores
+    const seoScore = calculateSeoScore(h1Count);
+    const geoScore = calculateGeoScore(h1Count);
 
-    // SEO Suggestions
-    const seoSuggestions = [];
-    if (!title) seoSuggestions.push('Add a page title.');
-    if (metaDesc.length < 80) seoSuggestions.push('Use a meta description with 80–160 characters.');
-    if (h1Count === 0) seoSuggestions.push('Add at least one <h1> tag.');
-    if (wordCount < 300) seoSuggestions.push('Add more body content.');
-
-    // GEO Suggestions
-    const geoSuggestions = [];
-    if (!hasFaqSchema) geoSuggestions.push('Add FAQ schema using JSON-LD for AI visibility.');
-    if (!metaDesc.match(/AI|FAQ|how to|guide/i)) geoSuggestions.push('Use AI-friendly keywords in meta description.');
-    if (!title.match(/\bhow|why|what\b/i)) geoSuggestions.push('Use question-style titles to attract AI and search bots.');
-    if (wordCount < 500) geoSuggestions.push('Expand your content to improve AI understanding.');
+    // Generate suggestions
+    const seoSuggestions = generateSeoSuggestions(h1Count);
+    const geoSuggestions = generateGeoSuggestions(h1Count);
 
     res.json({
-      url,
-      title,
-      metaDesc,
-      h1Count,
-      wordCount,
-      seoScore,
-      geoScore,
-      seoSuggestions,
-      geoSuggestions
+      url: targetUrl,
+      seo: {
+        score: seoScore,
+        suggestions: seoSuggestions,
+      },
+      geo: {
+        score: geoScore,
+        suggestions: geoSuggestions,
+      },
+      details: {
+        h1Count,
+      },
     });
-
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch or analyze the website.', details: err.message });
+  } catch (error) {
+    console.error('Error in /analyze:', error.message);
+    res.status(500).json({ error: 'Something went wrong during analysis.' });
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`✅ GEO/SEO API running at http://localhost:${PORT}`));
+// Route to get performance metrics using Google PageSpeed Insights API
+app.get('/analyze/performance', async (req, res) => {
+  try {
+    const targetUrl = req.query.url;
+    if (!targetUrl) {
+      return res.status(400).json({ error: 'Missing url query parameter' });
+    }
+
+    const psiApiUrl = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(targetUrl)}&category=performance&key=${GOOGLE_API_KEY}`;
+
+    const response = await axios.get(psiApiUrl);
+    const audits = response.data.lighthouseResult.audits;
+
+    const fcp = audits['first-contentful-paint']?.displayValue || 'N/A';
+    const lcp = audits['largest-contentful-paint']?.displayValue || 'N/A';
+    const cls = audits['cumulative-layout-shift']?.displayValue || 'N/A';
+
+    res.json({
+      url: targetUrl,
+      performance: {
+        FCP: fcp,
+        LCP: lcp,
+        CLS: cls,
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching performance data:', error.message);
+    res.status(500).json({ error: 'Failed to fetch performance metrics' });
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
