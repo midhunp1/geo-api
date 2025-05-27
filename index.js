@@ -8,19 +8,17 @@ app.use(cors());
 
 const PORT = process.env.PORT || 3000;
 
-// Replace with your real Google API key
+// ✅ Replace with your real Google API key (in quotes)
 const GOOGLE_API_KEY = 'AIzaSyCnoZDb48zkO9FAyMmWQ-qX06IYYTGRTeM';
 
-// Basic SEO & GEO score calculation based on H1 tags (example logic)
+// ======= SEO & GEO Logic ======= //
 function calculateSeoScore(h1Count) {
-  // Simple example: more H1s = lower SEO score (ideally 1 H1)
   if (h1Count === 1) return 90;
   if (h1Count === 0) return 30;
   return Math.max(0, 100 - (h1Count - 1) * 20);
 }
 
 function calculateGeoScore(h1Count) {
-  // Dummy GEO scoring: reward presence of H1 and assume good structure
   return h1Count > 0 ? 80 : 40;
 }
 
@@ -35,7 +33,7 @@ function generateGeoSuggestions(h1Count) {
   return ['Content structure looks good for AI analysis.'];
 }
 
-// Route to analyze SEO & GEO scores based on URL content
+// ======= /analyze SEO & GEO ======= //
 app.get('/analyze', async (req, res) => {
   try {
     const targetUrl = req.query.url;
@@ -43,21 +41,14 @@ app.get('/analyze', async (req, res) => {
       return res.status(400).json({ error: 'Missing url query parameter' });
     }
 
-    // Fetch HTML content
     const response = await axios.get(targetUrl);
     const html = response.data;
-
-    // Load HTML to cheerio for parsing
     const $ = cheerio.load(html);
-
-    // Count number of <h1> tags
     const h1Count = $('h1').length;
 
-    // Calculate SEO and GEO scores
     const seoScore = calculateSeoScore(h1Count);
     const geoScore = calculateGeoScore(h1Count);
 
-    // Generate suggestions
     const seoSuggestions = generateSeoSuggestions(h1Count);
     const geoSuggestions = generateGeoSuggestions(h1Count);
 
@@ -81,7 +72,7 @@ app.get('/analyze', async (req, res) => {
   }
 });
 
-// Route to get performance metrics using Google PageSpeed Insights API
+// ======= /analyze/performance (Google PSI) ======= //
 app.get('/analyze/performance', async (req, res) => {
   try {
     const targetUrl = req.query.url;
@@ -89,10 +80,12 @@ app.get('/analyze/performance', async (req, res) => {
       return res.status(400).json({ error: 'Missing url query parameter' });
     }
 
-    const psiApiUrl = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(targetUrl)}&category=performance&key=${GOOGLE_API_KEY}`;
+    const psiApiUrl = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(
+      targetUrl
+    )}&category=performance&key=${GOOGLE_API_KEY}`;
 
     const response = await axios.get(psiApiUrl);
-    const audits = response.data.lighthouseResult.audits;
+    const audits = response.data.lighthouseResult?.audits;
 
     const fcp = audits['first-contentful-paint']?.displayValue || 'N/A';
     const lcp = audits['largest-contentful-paint']?.displayValue || 'N/A';
@@ -108,10 +101,16 @@ app.get('/analyze/performance', async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching performance data:', error.message);
-    res.status(500).json({ error: 'Failed to fetch performance metrics' });
+    if (error.response?.data) {
+      console.error('API Response:', JSON.stringify(error.response.data, null, 2));
+      res.status(500).json({ error: error.response.data });
+    } else {
+      res.status(500).json({ error: 'Failed to fetch performance metrics' });
+    }
   }
 });
 
+// ======= Start Server ======= //
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`✅ Server running on port ${PORT}`);
 });
