@@ -2,14 +2,12 @@ const express = require('express');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const cors = require('cors');
+const puppeteer = require('puppeteer');
 
 const app = express();
 app.use(cors());
 
 const PORT = process.env.PORT || 3000;
-
-// ✅ Replace with your real Google API key (in quotes)
-const GOOGLE_API_KEY = 'AIzaSyCnoZDb48zkO9FAyMmWQ-qX06IYYTGRTeM';
 
 // ======= SEO & GEO Logic ======= //
 function calculateSeoScore(h1Count) {
@@ -33,7 +31,7 @@ function generateGeoSuggestions(h1Count) {
   return ['Content structure looks good for AI analysis.'];
 }
 
-// ======= /analyze SEO & GEO ======= //
+// ======= /analyze (SEO & GEO) ======= //
 app.get('/analyze', async (req, res) => {
   try {
     const targetUrl = req.query.url;
@@ -72,41 +70,60 @@ app.get('/analyze', async (req, res) => {
   }
 });
 
-// ======= /analyze/performance (Google PSI) ======= //
+// ======= /analyze/performance (Puppeteer) ======= //
 app.get('/analyze/performance', async (req, res) => {
+  const targetUrl = req.query.url;
+
+  if (!targetUrl) {
+    return res.status(400).json({ error: 'Missing url query parameter' });
+  }
+
   try {
-    const targetUrl = req.query.url;
-    if (!targetUrl) {
-      return res.status(400).json({ error: 'Missing url query parameter' });
-    }
+    const browser = await puppeteer.launch({ headless: 'new' });
+    const page = await browser.newPage();
 
-    const psiApiUrl = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(
-      targetUrl
-    )}&category=performance&key=${GOOGLE_API_KEY}`;
+    let totalSize = 0;
+    let requestCount = 0;
 
-    const response = await axios.get(psiApiUrl);
-    const audits = response.data.lighthouseResult?.audits;
+    // Track requests to measure size and count
+    page.on('response', async (response) => {
+      try {
+        const buffer = await response.buffer();
+        totalSize += buffer.length;
+        requestCount++;
+      } catch (e) {
+        // Skip failed/blocked requests
+      }
+    });
 
-    const fcp = audits['first-contentful-paint']?.displayValue || 'N/A';
-    const lcp = audits['largest-contentful-paint']?.displayValue || 'N/A';
-    const cls = audits['cumulative-layout-shift']?.displayValue || 'N/A';
+    await page.goto(targetUrl, { waitUntil: 'load', timeout: 30000 });
+
+    const metrics = await page.evaluate(() => {
+      const timing = performance.timing;
+      const paint = performance.getEntriesByType('paint');
+
+      return {
+        fcp: paint.find(p => p.name === 'first-contentful-paint')?.startTime || 0,
+        domContentLoaded: timing.domContentLoadedEventEnd - timing.navigationStart,
+        totalLoadTime: timing.loadEventEnd - timing.navigationStart,
+      };
+    });
+
+    await browser.close();
 
     res.json({
       url: targetUrl,
       performance: {
-        FCP: fcp,
-        LCP: lcp,
-        CLS: cls,
+        FCP: `${metrics.fcp.toFixed(2)} ms`,
+        DOMContentLoaded: `${metrics.domContentLoaded} ms`,
+        LoadTime: `${metrics.totalLoadTime} ms`,
+        Requests: requestCount,
+        PageSizeKB: `${(totalSize / 1024).toFixed(2)} KB`,
       },
     });
   } catch (error) {
-    console.error('Error fetching performance data:', error.message);
-    if (error.response?.data) {
-      console.error('API Response:', JSON.stringify(error.response.data, null, 2));
-      res.status(500).json({ error: error.response.data });
-    } else {
-      res.status(500).json({ error: 'Failed to fetch performance metrics' });
-    }
+    console.error('Error in /analyze/performance:', error.message);
+    res.status(500).json({ error: 'Failed to analyze performance.' });
   }
 });
 
