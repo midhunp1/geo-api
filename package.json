@@ -4,8 +4,8 @@
   "description": "SEO + GEO + Performance Analyzer",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
-    "postinstall": "PUPPETEER_SKIP_DOWNLOAD=true"
+    "start": "node index.js",
+    "postinstall": "echo 'Skipping Chromium download' && PUPPETEER_SKIP_DOWNLOAD=true"
   },
   "dependencies": {
     "axios": "^1.6.0",
