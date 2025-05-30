@@ -2,14 +2,13 @@ const express = require('express');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const cors = require('cors');
-const puppeteer = require('puppeteer');
 
 const app = express();
 app.use(cors());
 
 const PORT = process.env.PORT || 3000;
 
-// ======= SEO & GEO Logic ======= //
+// === Scoring Functions ===
 function calculateSeoScore(h1Count) {
   if (h1Count === 1) return 90;
   if (h1Count === 0) return 30;
@@ -31,7 +30,7 @@ function generateGeoSuggestions(h1Count) {
   return ['Content structure looks good for AI analysis.'];
 }
 
-// ======= /analyze (SEO & GEO) ======= //
+// === Analyze Endpoint ===
 app.get('/analyze', async (req, res) => {
   try {
     const targetUrl = req.query.url;
@@ -42,13 +41,42 @@ app.get('/analyze', async (req, res) => {
     const response = await axios.get(targetUrl);
     const html = response.data;
     const $ = cheerio.load(html);
-    const h1Count = $('h1').length;
 
+    // SEO & GEO logic
+    const h1Count = $('h1').length;
     const seoScore = calculateSeoScore(h1Count);
     const geoScore = calculateGeoScore(h1Count);
-
     const seoSuggestions = generateSeoSuggestions(h1Count);
     const geoSuggestions = generateGeoSuggestions(h1Count);
+
+    // Extra Metadata & Stats
+    const title = $('title').text().trim();
+    const metaDescription = $('meta[name="description"]').attr('content') || 'N/A';
+
+    const text = $('body').text().replace(/\s+/g, ' ');
+    const wordCount = text.split(' ').filter(Boolean).length;
+
+    const links = $('a');
+    const totalLinks = links.length;
+    let internalLinks = 0, externalLinks = 0;
+    links.each((_, el) => {
+      const href = $(el).attr('href');
+      if (href && href.startsWith('http')) externalLinks++;
+      else internalLinks++;
+    });
+
+    const images = $('img');
+    const imagesWithAlt = images.filter((_, img) => $(img).attr('alt') && $(img).attr('alt').trim() !== '').length;
+
+    const inlineStyles = $('[style]').length;
+    const externalCss = $('link[rel="stylesheet"]').length;
+
+    const scriptTags = $('script');
+    const scriptCounts = {
+      total: scriptTags.length,
+      async: scriptTags.filter((_, el) => $(el).attr('async') !== undefined).length,
+      defer: scriptTags.filter((_, el) => $(el).attr('defer') !== undefined).length
+    };
 
     res.json({
       url: targetUrl,
@@ -60,9 +88,28 @@ app.get('/analyze', async (req, res) => {
         score: geoScore,
         suggestions: geoSuggestions,
       },
-      details: {
-        h1Count,
+      metadata: {
+        title,
+        metaDescription,
       },
+      contentStats: {
+        h1Count,
+        wordCount,
+        links: {
+          total: totalLinks,
+          internal: internalLinks,
+          external: externalLinks,
+        },
+        images: {
+          total: images.length,
+          withAlt: imagesWithAlt,
+        },
+        styles: {
+          inlineStyles,
+          externalCss,
+        },
+        scripts: scriptCounts,
+      }
     });
   } catch (error) {
     console.error('Error in /analyze:', error.message);
@@ -70,64 +117,7 @@ app.get('/analyze', async (req, res) => {
   }
 });
 
-// ======= /analyze/performance (Puppeteer) ======= //
-app.get('/analyze/performance', async (req, res) => {
-  const targetUrl = req.query.url;
-
-  if (!targetUrl) {
-    return res.status(400).json({ error: 'Missing url query parameter' });
-  }
-
-  try {
-    const browser = await puppeteer.launch({ headless: 'new' });
-    const page = await browser.newPage();
-
-    let totalSize = 0;
-    let requestCount = 0;
-
-    // Track requests to measure size and count
-    page.on('response', async (response) => {
-      try {
-        const buffer = await response.buffer();
-        totalSize += buffer.length;
-        requestCount++;
-      } catch (e) {
-        // Skip failed/blocked requests
-      }
-    });
-
-    await page.goto(targetUrl, { waitUntil: 'load', timeout: 30000 });
-
-    const metrics = await page.evaluate(() => {
-      const timing = performance.timing;
-      const paint = performance.getEntriesByType('paint');
-
-      return {
-        fcp: paint.find(p => p.name === 'first-contentful-paint')?.startTime || 0,
-        domContentLoaded: timing.domContentLoadedEventEnd - timing.navigationStart,
-        totalLoadTime: timing.loadEventEnd - timing.navigationStart,
-      };
-    });
-
-    await browser.close();
-
-    res.json({
-      url: targetUrl,
-      performance: {
-        FCP: `${metrics.fcp.toFixed(2)} ms`,
-        DOMContentLoaded: `${metrics.domContentLoaded} ms`,
-        LoadTime: `${metrics.totalLoadTime} ms`,
-        Requests: requestCount,
-        PageSizeKB: `${(totalSize / 1024).toFixed(2)} KB`,
-      },
-    });
-  } catch (error) {
-    console.error('Error in /analyze/performance:', error.message);
-    res.status(500).json({ error: 'Failed to analyze performance.' });
-  }
-});
-
-// ======= Start Server ======= //
+// Start Server
 app.listen(PORT, () => {
   console.log(`✅ Server running on port ${PORT}`);
 });
