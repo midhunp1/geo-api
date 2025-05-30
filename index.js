@@ -30,6 +30,13 @@ function generateGeoSuggestions(h1Count) {
   return ['Content structure looks good for AI analysis.'];
 }
 
+// === Simple hallucination risk estimator ===
+function estimateHallucinationRisk(html) {
+  // For demo: low risk if <h1> present, else high risk
+  const hasH1 = /<h1>/.test(html);
+  return hasH1 ? 'low' : 'high';
+}
+
 // === Analyze Endpoint ===
 app.get('/analyze', async (req, res) => {
   try {
@@ -46,8 +53,8 @@ app.get('/analyze', async (req, res) => {
     const h1Count = $('h1').length;
     const seoScore = calculateSeoScore(h1Count);
     const geoScore = calculateGeoScore(h1Count);
-    const seoSuggestions = generateSeoSuggestions(h1Count);
-    const geoSuggestions = generateGeoSuggestions(h1Count);
+    const seoAdvice = generateSeoSuggestions(h1Count);
+    const geoAdvice = generateGeoSuggestions(h1Count);
 
     // Extra Metadata & Stats
     const title = $('title').text().trim();
@@ -78,16 +85,17 @@ app.get('/analyze', async (req, res) => {
       defer: scriptTags.filter((_, el) => $(el).attr('defer') !== undefined).length
     };
 
+    // hallucinationRisk calculation
+    const hallucinationRisk = estimateHallucinationRisk(html);
+
     res.json({
       url: targetUrl,
-      seo: {
-        score: seoScore,
-        suggestions: seoSuggestions,
-      },
-      geo: {
-        score: geoScore,
-        suggestions: geoSuggestions,
-      },
+      seoScore,           // flattened
+      geoScore,           // flattened
+      seoAdvice,          // renamed from suggestions
+      geoAdvice,          // renamed from suggestions
+      hallucinationRisk,  // new field
+
       metadata: {
         title,
         metaDescription,
